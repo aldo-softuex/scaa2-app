@@ -1,0 +1,58 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom
+.buildlog
+.history
+.svn
+.idea
+*.iml
+.vscode
+.project
+.fslckout
+.vshistory
+
+# Flutter/Dart/Pub
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/pubspec.lock
+
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+*.flat
+**/android/app/debug
+**/android/app/profile
+**/android/app/release
+
+# iOS
+*.xcworkspace
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/App.framework
+**/ios/Flutter/App.podspec
+**/ios/Flutter/App.framework.dSYM.zip
+**/ios/config/
+**/Podfile.lock
+
+# macOS
+**/macos/Flutter/Ephemere/
+
+# Linux
+**/linux/flutter/generated_plugins.cmake
+
+# Windows
+**/windows/flutter/generated_plugins.cmake
+
+# Symbolication logging
+isolated_extension_custom_symbols.txt
