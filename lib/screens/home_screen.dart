@@ -1,7 +1,48 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  List<dynamic> _recentInes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecentActivity();
+  }
+
+  Future<void> _loadRecentActivity() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString('saved_ines');
+    if (data != null) {
+      if (mounted) {
+        setState(() {
+          _recentInes = json.decode(data);
+        });
+      }
+    }
+  }
+
+  String _formatTime(String? isoString) {
+    if (isoString == null) return '';
+    try {
+      final date = DateTime.parse(isoString);
+      final diff = DateTime.now().difference(date);
+      if (diff.inMinutes < 1) return 'ahora';
+      if (diff.inHours < 1) return '${diff.inMinutes} min ago';
+      if (diff.inDays < 1) return '${diff.inHours}h ago';
+      return '${diff.inDays}d ago';
+    } catch (_) {
+      return '';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -90,9 +131,9 @@ class HomeScreen extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          '1,280',
-                          style: TextStyle(
+                        Text(
+                          _recentInes.length.toString(),
+                          style: const TextStyle(
                             fontSize: 32,
                             fontWeight: FontWeight.w900,
                             color: Color(0xFFE11D48),
@@ -168,15 +209,31 @@ class HomeScreen extends StatelessWidget {
 
               // Recent list looking like cards from design
               Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  children: [
-                    _buildRecentCard('INE - Juan Perez', 'Juan Ramone P. L.', '24 min ago', isDarkMode),
-                    _buildRecentCard('PASAPORTE - M. Garza', 'Maria Garza S.', '52 min ago', isDarkMode),
-                    _buildRecentCard('INE - Carlos Lopez', 'Carlos Lopez F.', '2h ago', isDarkMode),
-                    const SizedBox(height: 20),
-                  ],
-                ),
+                child: _recentInes.isEmpty 
+                    ? Center(
+                        child: Text(
+                          'No hay actividad reciente', 
+                          style: TextStyle(color: isDarkMode ? Colors.white54 : Colors.grey)
+                        )
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        itemCount: _recentInes.length,
+                        itemBuilder: (context, index) {
+                          final record = _recentInes[index];
+                          final timeStr = _formatTime(record['timestamp']);
+                          
+                          String nombres = record['NOMBRES'] ?? '';
+                          String paterno = record['PATERNO'] ?? '';
+                          String materno = record['MATERNO'] ?? '';
+                          
+                          String nameFirstWord = nombres.isNotEmpty ? nombres.split(' ').first : 'N/D';
+                          String docTitle = 'INE - $nameFirstWord $paterno';
+                          String fullName = '$nombres $paterno $materno'.trim();
+                          
+                          return _buildRecentCard(docTitle, fullName, timeStr, isDarkMode);
+                        },
+                      ),
               ),
             ],
           ),
@@ -218,9 +275,10 @@ class HomeScreen extends StatelessWidget {
         bgColor == const Color(0xFF1F2937) ||
         bgColor == const Color(0xFF374151);
     return InkWell(
-      onTap: () {
+      onTap: () async {
         if (title.contains('ESCANEO')) {
-          Navigator.pushNamed(context, '/scan');
+          await Navigator.pushNamed(context, '/scan');
+          _loadRecentActivity();
         } else if (title.contains('DATOS')) {
           Navigator.pushNamed(context, '/logs');
         } else if (title.contains('AJUSTES')) {

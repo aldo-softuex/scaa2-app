@@ -108,15 +108,45 @@ class OCRService {
     }
 
     // Línea 3
+    String paterno = '';
+    String materno = '';
+    String nombres = '';
     String fullName = '';
+
     if (line3 != null) {
-      fullName = line3.replaceAll('<', ' ').trim();
+      // Remover los '<' de relleno al final
+      String cleanLine3 = line3.replaceAll(RegExp(r'<+$'), '');
+      
+      // En el MRZ, '<<' separa los apellidos de los nombres
+      List<String> parts = cleanLine3.split('<<');
+      if (parts.length >= 2) {
+        String apellidosPart = parts[0];
+        String nombresPart = parts[1];
+        
+        // El primer '<' separa Paterno de Materno
+        List<String> apellidos = apellidosPart.split('<');
+        paterno = apellidos.isNotEmpty ? apellidos[0] : '';
+        materno = apellidos.length > 1 ? apellidos.sublist(1).join(' ') : '';
+        
+        // Reemplazar TODOS los '<' restantes en los nombres por espacios
+        nombres = nombresPart.replaceAll('<', ' ').trim();
+        // Asegurarse de que no queden múltiples espacios seguidos
+        nombres = nombres.replaceAll(RegExp(r'\s+'), ' ');
+        
+        // Reconstruimos el nombre completo para la UI
+        fullName = '$nombres $paterno $materno'.trim().replaceAll(RegExp(r'\s+'), ' ');
+      } else {
+        fullName = cleanLine3.replaceAll('<', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
+      }
     }
 
     return {
       'CLAVE_ELECTOR': electorKey,
       'SECCION': section,
       'NOMBRE_MRZ': fullName,
+      'PATERNO_MRZ': paterno,
+      'MATERNO_MRZ': materno,
+      'NOMBRES_MRZ': nombres,
       'NACIMIENTO': _formatDate(birthDate),
       'SEXO': sex == 'M' ? 'Hombre' : (sex == 'F' ? 'Mujer' : sex),
       'VIGENCIA': _formatDate(expirationDate, isExp: true),

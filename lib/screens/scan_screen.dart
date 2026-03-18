@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:image/image.dart' as img;
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/ner_scanner_service.dart';
 import '../services/ocr_service.dart';
 
@@ -37,7 +38,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
 
   Map<String, dynamic>? _apiData;
   Map<String, String>? _backApiData;
-  String? _rawOcrText;
   String? _apiError;
 
   final OCRService _ocrService = OCRService();
@@ -151,7 +151,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     try {
       // Frente (API)
       final String textoFrente = await _ocrService.extraerTexto(frontBytes);
-      setState(() => _rawOcrText = textoFrente);
+      
       if (textoFrente.isNotEmpty) {
         debugPrint('🚀 Enviando a API NER: $textoFrente');
         final response = await http.post(
@@ -188,6 +188,41 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
         _isProcessing = false;
       });
     }
+  }
+
+  Future<void> _saveFinalData() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    final front = _apiData ?? {};
+    final back = _backApiData ?? {};
+
+    Map<String, dynamic> record = {
+      'timestamp': DateTime.now().toIso8601String(),
+      'NOMBRES': back['NOMBRES_MRZ'] ?? front['NOMBRE'] ?? front['nombre'] ?? 'N/D',
+      'PATERNO': back['PATERNO_MRZ'] ?? front['PATERNO'] ?? front['paterno'] ?? 'N/D',
+      'MATERNO': back['MATERNO_MRZ'] ?? front['MATERNO'] ?? front['materno'] ?? 'N/D',
+      'CURP': front['CURP'] ?? front['curp'] ?? 'N/D',
+      'CLAVE': front['CLAVE'] ?? front['clave'] ?? 'N/D',
+      'SEXO': back['SEXO'] ?? 'N/D',
+      'NACIMIENTO': back['NACIMIENTO'] ?? 'N/D',
+      'SECCION': back['SECCION'] ?? 'N/D',
+      'VIGENCIA': back['VIGENCIA'] ?? 'N/D',
+      'DOMICILIO': front['DOMICILIO'] ?? front['domicilio'] ?? 'N/D',
+    };
+
+    String? existingData = prefs.getString('saved_ines');
+    List<dynamic> records = [];
+    if (existingData != null) {
+      records = json.decode(existingData);
+    }
+    
+    records.insert(0, record);
+    
+    if (records.length > 3) {
+      records = records.sublist(0, 3);
+    }
+    
+    await prefs.setString('saved_ines', json.encode(records));
   }
 
   @override
@@ -399,7 +434,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     }
     return Column(
       children: [
-        const Text('RESUMEN DE DATOS HOMOLOGADOS', 
+        const Text('DATOS EXTRAÍDOS', 
           style: TextStyle(color: Color(0xFFE11D48), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
         const SizedBox(height: 12),
         _buildUnifiedDataCard(),
@@ -408,7 +443,10 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () async {
+              await _saveFinalData();
+              if (mounted) Navigator.pop(context);
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFE11D48),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -428,15 +466,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
           }),
           child: const Text('Volver a escanear', style: TextStyle(color: Colors.white54)),
         ),
-        const SizedBox(height: 32),
-        const Text('OCR RAW TEXT (FRENTE)', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
-          child: Text(_rawOcrText ?? 'Sin datos', style: const TextStyle(color: Colors.white70, fontSize: 11, fontFamily: 'monospace')),
-        ),
       ],
     );
   }
@@ -446,7 +475,9 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     final back = _backApiData ?? {};
 
     return _card(children: [
-      _field('Nombre Completo (MRZ)', back['NOMBRE_MRZ'] ?? 'N/D'),
+      _field('Nombre(s)', back['NOMBRES_MRZ'] ?? 'N/D'),
+      _field('Apellido Paterno', back['PATERNO_MRZ'] ?? 'N/D'),
+      _field('Apellido Materno', back['MATERNO_MRZ'] ?? 'N/D'),
       _field('CURP', front['CURP'] ?? front['curp'] ?? 'N/D'),
       _field('Clave de Elector', front['CLAVE'] ?? front['clave'] ?? 'N/D'),
       _field('Sexo', back['SEXO'] ?? 'N/D'),
