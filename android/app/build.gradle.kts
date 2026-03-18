@@ -28,6 +28,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        ndk {
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+        }
     }
 
     buildTypes {
@@ -37,6 +41,23 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    aaptOptions {
+        noCompress("tflite")
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            pickFirsts += "lib/**/libtensorflowlite_jni.so"
+            pickFirsts += "lib/**/libtensorflowlite.so"
+            pickFirsts += "lib/**/liblitert_jni.so"
+        }
+    }
+}
+
+dependencies {
+    // Los plugins de Flutter ahora manejan esto
 }
 
 flutter {
