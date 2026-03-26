@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -30,12 +32,60 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     _controller.forward();
 
-    // Navigate to Login after 2.5 seconds
-    Future.delayed(const Duration(milliseconds: 2500), () {
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/login');
+    _checkLoginStatus();
+  }
+
+  Future<void> _checkLoginStatus() async {
+    // Mantener visible el splash por al menos 2.5 segundos
+    await Future.delayed(const Duration(milliseconds: 2500));
+    if (!mounted) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? token = prefs.getString('auth_token');
+
+      bool isTokenValid = false;
+
+      if (token != null && token.isNotEmpty) {
+        final parts = token.split('.');
+        if (parts.length == 3) {
+          // Intenta validar como si fuera un token JWT (json web token)
+          try {
+            final payload = parts[1];
+            final normalized = base64Url.normalize(payload);
+            final resp = utf8.decode(base64Url.decode(normalized));
+            final payloadMap = json.decode(resp);
+
+            if (payloadMap.containsKey('exp')) {
+              final exp = payloadMap['exp'] * 1000;
+              final expDate = DateTime.fromMillisecondsSinceEpoch(exp);
+              if (DateTime.now().isBefore(expDate)) {
+                isTokenValid = true; // Aún vigente
+              } else {
+                await prefs.remove('auth_token'); // Expirado
+              }
+            } else {
+              isTokenValid = true; // No tiene fecha, se toma válido
+            }
+          } catch (e) {
+            isTokenValid = true; // Si es inválido por parseo pero está en sesión, se deja avanzar
+          }
+        } else {
+          // Tokens como Sanctum de Laravel o tokens sencillos
+          isTokenValid = true; 
+        }
       }
-    });
+
+      if (mounted) {
+        if (isTokenValid) {
+          Navigator.pushReplacementNamed(context, '/home');
+        } else {
+          Navigator.pushReplacementNamed(context, '/login');
+        }
+      }
+    } catch (e) {
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+    }
   }
 
   @override
