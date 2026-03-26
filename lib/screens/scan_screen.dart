@@ -317,7 +317,18 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
         "NUMERO": _controllers['NUMERO']?.text ?? "",
         "imagenb64": _frontImage != null ? base64Encode(_frontImage!) : "",
         "imagen_face": _faceImage != null ? base64Encode(_faceImage!) : "",
+        "ine_trasera": _backImage != null ? base64Encode(_backImage!) : "",
       };
+
+      final String reqBody = json.encode(body);
+      
+      // Crear copia para el log acortando las imágenes para no saturar la consola
+      final Map<String, dynamic> logBody = Map.from(body);
+      if (logBody['imagenb64'].toString().length > 30) logBody['imagenb64'] = '[BASE64_FRENTE_AQUI]';
+      if (logBody['imagen_face'].toString().length > 30) logBody['imagen_face'] = '[BASE64_ROSTRO_AQUI]';
+      if (logBody['ine_trasera'].toString().length > 30) logBody['ine_trasera'] = '[BASE64_REVERSO_AQUI]';
+      
+      debugPrint('Enviando petición a la API con BODY: ${json.encode(logBody)}');
 
       final response = await http.post(
         Uri.parse('https://scaa.olgasosa.mx/api/seccion/crear/dev'),
@@ -325,7 +336,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: json.encode(body),
+        body: reqBody,
       ).timeout(const Duration(seconds: 15));
 
       debugPrint('Status POST final: ${response.statusCode}');
@@ -785,10 +796,72 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
               );
               await _sendDataToApi();
               await _saveFinalData();
-              if (mounted) {
-                Navigator.pop(context); // Cierra popup
-                Navigator.pop(context); // Cierra pantalla
-              }
+              if (!mounted) return;
+              
+              Navigator.pop(context); // Cierra el modal de carga
+
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                isDismissible: false,
+                enableDrag: false,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                builder: (context) {
+                  return Container(
+                    padding: EdgeInsets.only(
+                      left: 24, 
+                      right: 24, 
+                      top: 20, 
+                      bottom: MediaQuery.of(context).padding.bottom + 24, // Protege contra la barra de navegación nativa
+                    ),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 40, height: 4,
+                          decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+                        ),
+                        const SizedBox(height: 24),
+                        const Text('¡Registro Guardado!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        const SizedBox(height: 20),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(color: const Color(0xFFE11D48).withOpacity(0.3), blurRadius: 20, spreadRadius: 5)
+                            ],
+                          ),
+                          child: const Icon(Icons.check_rounded, color: Color(0xFFE11D48), size: 60),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text('Tu información se ha guardado\ncorrectamente.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.black87)),
+                        const SizedBox(height: 32),
+                        SizedBox(
+                          width: double.infinity, height: 50,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.pop(context); // Cierra bottom sheet
+                              Navigator.pop(context); // Regresa a home
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFE11D48),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Entendido', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFE11D48),
