@@ -6,9 +6,13 @@ import 'package:flutter/rendering.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:image/image.dart' as img;
 import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../services/ner_scanner_service.dart';
 import '../services/ocr_service.dart';
+import '../utils/address_parser.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -35,13 +39,35 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
   Uint8List? _frontImage;
   Uint8List? _backImage;
   bool _isCapturingBack = false;
+  bool _showFrontPreview = false;
+  ui.Image? _frozenCameraFrame;
 
   Map<String, dynamic>? _apiData;
   Map<String, String>? _backApiData;
   String? _apiError;
+  Uint8List? _faceImage;
 
   final OCRService _ocrService = OCRService();
   final NERScannerService _nerService = NERScannerService();
+  final FaceDetector _faceDetector = FaceDetector(options: FaceDetectorOptions());
+
+  final Map<String, TextEditingController> _controllers = {
+    'NOMBRES': TextEditingController(),
+    'PATERNO': TextEditingController(),
+    'MATERNO': TextEditingController(),
+    'CURP': TextEditingController(),
+    'CLAVE': TextEditingController(),
+    'SEXO': TextEditingController(),
+    'NACIMIENTO': TextEditingController(),
+    'SECCION': TextEditingController(),
+    'VIGENCIA': TextEditingController(),
+    'DOMICILIO': TextEditingController(),
+    'MUNICIPIO': TextEditingController(),
+    'COLONIA': TextEditingController(),
+    'CODIGO_POSTAL': TextEditingController(),
+    'CALLE': TextEditingController(),
+    'NUMERO': TextEditingController(),
+  };
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -64,6 +90,10 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     _cameraController.dispose();
     _pulseController.dispose();
     _ocrService.dispose();
+    _faceDetector.close();
+    for (var controller in _controllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -86,6 +116,13 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
 
       final RenderRepaintBoundary boundary = _scannerKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
       final ui.Image fullImage = await boundary.toImage(pixelRatio: pixelRatio);
+
+      if (mounted) {
+        setState(() => _frozenCameraFrame = fullImage);
+        // Permitir que el UI dibuje el frame congelado instantáneamente antes del procesamiento pesado
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+
       final ByteData? byteData = await fullImage.toByteData(format: ui.ImageByteFormat.png);
       final Uint8List fullBytes = byteData!.buffer.asUint8List();
 
@@ -119,24 +156,29 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
       if (!_isCapturingBack) {
         setState(() {
           _frontImage = processedBytes;
-          _isCapturingBack = true;
+          _showFrontPreview = true;
           _isCapturing = false;
+          _faceImage = null;
+          _frozenCameraFrame = null;
         });
-        _cameraController.start();
       } else {
         setState(() {
           _backImage = processedBytes;
           showResults = true;
           _isCapturing = false;
+          _frozenCameraFrame = null;
         });
         _processFullIne(_frontImage!, _backImage!);
       }
     } catch (e) {
-      setState(() {
-        _apiError = 'Error al capturar: $e';
-        showResults = true;
-        _isCapturing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _apiError = 'Error al capturar: $e';
+          showResults = true;
+          _isCapturing = false;
+          _frozenCameraFrame = null;
+        });
+      }
     }
   }
 
@@ -146,9 +188,13 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
       _apiData = null;
       _backApiData = null;
       _apiError = null;
+      _faceImage = null;
     });
 
     try {
+      // Detección de rostro
+      await _detectFace(frontBytes);
+
       // Frente (API)
       final String textoFrente = await _ocrService.extraerTexto(frontBytes);
       
@@ -181,6 +227,32 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
       setState(() {
         _backApiData = backData;
         _isProcessing = false;
+
+        final front = _apiData ?? {};
+        final back = _backApiData ?? {};
+
+        _controllers['NOMBRES']?.text = back['NOMBRES_MRZ'] ?? front['NOMBRE'] ?? front['nombre'] ?? '';
+        _controllers['PATERNO']?.text = back['PATERNO_MRZ'] ?? front['PATERNO'] ?? front['paterno'] ?? '';
+        _controllers['MATERNO']?.text = back['MATERNO_MRZ'] ?? front['MATERNO'] ?? front['materno'] ?? '';
+        _controllers['CURP']?.text = front['CURP'] ?? front['curp'] ?? '';
+        _controllers['CLAVE']?.text = front['CLAVE'] ?? front['clave'] ?? '';
+        _controllers['SEXO']?.text = back['SEXO'] ?? '';
+        _controllers['NACIMIENTO']?.text = back['NACIMIENTO'] ?? '';
+        _controllers['SECCION']?.text = back['SECCION'] ?? '';
+        _controllers['VIGENCIA']?.text = back['VIGENCIA'] ?? '';
+        _controllers['DOMICILIO']?.text = front['DOMICILIO'] ?? front['domicilio'] ?? '';
+        _controllers['MUNICIPIO']?.text = front['MUNICIPIO'] ?? front['municipio'] ?? '';
+
+        final domicilioStr = _controllers['DOMICILIO']?.text;
+        final coloniaVal = AddressParser.extraerColoniaDeDomicilio(domicilioStr);
+        final cpVal = AddressParser.extraerCodigoPostal(domicilioStr);
+        final calleVal = AddressParser.extraerCalleDeDomicilio(domicilioStr, coloniaVal);
+        final numVal = AddressParser.extraerNumeroDeCalle(calleVal);
+
+        _controllers['COLONIA']?.text = coloniaVal;
+        _controllers['CODIGO_POSTAL']?.text = cpVal;
+        _controllers['CALLE']?.text = calleVal;
+        _controllers['NUMERO']?.text = numVal;
       });
     } catch (e) {
       setState(() {
@@ -190,24 +262,99 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     }
   }
 
+  Future<void> _detectFace(Uint8List imageBytes) async {
+    File? tempFile;
+    try {
+      final dir = await getTemporaryDirectory();
+      tempFile = File('${dir.path}/face_detect_tmp.jpg');
+      await tempFile.writeAsBytes(imageBytes);
+
+      final InputImage inputImage = InputImage.fromFilePath(tempFile.path);
+      final List<Face> faces = await _faceDetector.processImage(inputImage);
+      debugPrint('🔍 Rostros detectados: ${faces.length}');
+      if (faces.isEmpty) return;
+
+      final Face largest = faces.reduce((a, b) =>
+          (a.boundingBox.width * a.boundingBox.height) >=
+                  (b.boundingBox.width * b.boundingBox.height)
+              ? a
+              : b);
+
+      final img.Image? decoded = img.decodeImage(imageBytes);
+      if (decoded == null) return;
+
+      final Rect box = largest.boundingBox;
+      final int x = box.left.round().clamp(0, decoded.width - 1);
+      final int y = box.top.round().clamp(0, decoded.height - 1);
+      final int w = box.width.round().clamp(1, decoded.width - x);
+      final int h = box.height.round().clamp(1, decoded.height - y);
+      final img.Image cropped = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
+      setState(() => _faceImage = Uint8List.fromList(img.encodePng(cropped)));
+    } catch (e) {
+      debugPrint('❌ Error detectando rostro: $e');
+    } finally {
+      await tempFile?.delete();
+    }
+  }
+
+  Future<void> _sendDataToApi() async {
+    try {
+      final Map<String, dynamic> body = {
+        "SEXO": _controllers['SEXO']?.text ?? "",
+        "PATERNO": _controllers['PATERNO']?.text ?? "",
+        "MATERNO": _controllers['MATERNO']?.text ?? "",
+        "NOMBRE": _controllers['NOMBRES']?.text ?? "",
+        "DOMICILIO": _controllers['DOMICILIO']?.text ?? "",
+        "MUNICIPIO": _controllers['MUNICIPIO']?.text ?? "",
+        "NACIMIENTO": _controllers['NACIMIENTO']?.text ?? "",
+        "SECCION": _controllers['SECCION']?.text ?? "",
+        "VIGENCIA": _controllers['VIGENCIA']?.text ?? "",
+        "CURP": _controllers['CURP']?.text ?? "",
+        "CLAVE": _controllers['CLAVE']?.text ?? "",
+        "COLONIA": _controllers['COLONIA']?.text ?? "",
+        "CODIGO_POSTAL": _controllers['CODIGO_POSTAL']?.text ?? "",
+        "CALLE": _controllers['CALLE']?.text ?? "",
+        "NUMERO": _controllers['NUMERO']?.text ?? "",
+        "imagenb64": _frontImage != null ? base64Encode(_frontImage!) : "",
+        "imagen_face": _faceImage != null ? base64Encode(_faceImage!) : "",
+      };
+
+      final response = await http.post(
+        Uri.parse('https://scaa.olgasosa.mx/api/seccion/crear/dev'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: json.encode(body),
+      ).timeout(const Duration(seconds: 15));
+
+      debugPrint('Status POST final: ${response.statusCode}');
+      debugPrint('Body POST final: ${response.body}');
+    } catch (e) {
+      debugPrint('Error en POST final: $e');
+    }
+  }
+
   Future<void> _saveFinalData() async {
     final prefs = await SharedPreferences.getInstance();
     
-    final front = _apiData ?? {};
-    final back = _backApiData ?? {};
-
     Map<String, dynamic> record = {
       'timestamp': DateTime.now().toIso8601String(),
-      'NOMBRES': back['NOMBRES_MRZ'] ?? front['NOMBRE'] ?? front['nombre'] ?? 'N/D',
-      'PATERNO': back['PATERNO_MRZ'] ?? front['PATERNO'] ?? front['paterno'] ?? 'N/D',
-      'MATERNO': back['MATERNO_MRZ'] ?? front['MATERNO'] ?? front['materno'] ?? 'N/D',
-      'CURP': front['CURP'] ?? front['curp'] ?? 'N/D',
-      'CLAVE': front['CLAVE'] ?? front['clave'] ?? 'N/D',
-      'SEXO': back['SEXO'] ?? 'N/D',
-      'NACIMIENTO': back['NACIMIENTO'] ?? 'N/D',
-      'SECCION': back['SECCION'] ?? 'N/D',
-      'VIGENCIA': back['VIGENCIA'] ?? 'N/D',
-      'DOMICILIO': front['DOMICILIO'] ?? front['domicilio'] ?? 'N/D',
+      'NOMBRES': _controllers['NOMBRES']!.text.isNotEmpty ? _controllers['NOMBRES']!.text : 'N/D',
+      'PATERNO': _controllers['PATERNO']!.text.isNotEmpty ? _controllers['PATERNO']!.text : 'N/D',
+      'MATERNO': _controllers['MATERNO']!.text.isNotEmpty ? _controllers['MATERNO']!.text : 'N/D',
+      'CURP': _controllers['CURP']!.text.isNotEmpty ? _controllers['CURP']!.text : 'N/D',
+      'CLAVE': _controllers['CLAVE']!.text.isNotEmpty ? _controllers['CLAVE']!.text : 'N/D',
+      'SEXO': _controllers['SEXO']!.text.isNotEmpty ? _controllers['SEXO']!.text : 'N/D',
+      'NACIMIENTO': _controllers['NACIMIENTO']!.text.isNotEmpty ? _controllers['NACIMIENTO']!.text : 'N/D',
+      'SECCION': _controllers['SECCION']!.text.isNotEmpty ? _controllers['SECCION']!.text : 'N/D',
+      'VIGENCIA': _controllers['VIGENCIA']!.text.isNotEmpty ? _controllers['VIGENCIA']!.text : 'N/D',
+      'DOMICILIO': _controllers['DOMICILIO']!.text.isNotEmpty ? _controllers['DOMICILIO']!.text : 'N/D',
+      'MUNICIPIO': _controllers['MUNICIPIO']!.text.isNotEmpty ? _controllers['MUNICIPIO']!.text : 'N/D',
+      'COLONIA': _controllers['COLONIA']!.text.isNotEmpty ? _controllers['COLONIA']!.text : 'N/D',
+      'CODIGO_POSTAL': _controllers['CODIGO_POSTAL']!.text.isNotEmpty ? _controllers['CODIGO_POSTAL']!.text : 'N/D',
+      'CALLE': _controllers['CALLE']!.text.isNotEmpty ? _controllers['CALLE']!.text : 'N/D',
+      'NUMERO': _controllers['NUMERO']!.text.isNotEmpty ? _controllers['NUMERO']!.text : 'N/D',
     };
 
     String? existingData = prefs.getString('saved_ines');
@@ -227,9 +374,136 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    if (showResults) return Scaffold(backgroundColor: Colors.black, body: _buildResultsView());
     return Scaffold(
       backgroundColor: Colors.black,
-      body: showResults ? _buildResultsView() : _buildCameraView(),
+      body: Stack(
+        children: [
+          _buildCameraView(),
+          if (_showFrontPreview)
+            Positioned.fill(child: _buildFrontPreview()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFrontPreview() {
+    return Stack(
+      children: [
+        Container(color: Colors.black),
+        Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.white.withOpacity(0.6),
+                  blurRadius: 30,
+                  spreadRadius: 5,
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: Image.memory(
+                _frontImage!,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 0, left: 0, right: 0,
+          child: Container(
+            padding: EdgeInsets.only(
+              top: MediaQuery.of(context).padding.top + 20,
+              bottom: 24, left: 24, right: 20,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE11D48).withOpacity(0.95),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10)],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded, color: Colors.white, size: 28),
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Text(
+                    'Verifica la legibilidad',
+                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.only(
+              top: 32, left: 24, right: 24,
+              bottom: MediaQuery.of(context).padding.bottom + 24,
+            ),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '¿Los datos son legibles y sin brillo?',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setState(() {
+                            _frontImage = null;
+                            _showFrontPreview = false;
+                          });
+                        },
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          side: const BorderSide(color: Color(0xFFE11D48), width: 2),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        child: const Text('Reintentar', style: TextStyle(color: Color(0xFFE11D48), fontSize: 16, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _isCapturingBack = true;
+                            _showFrontPreview = false;
+                          });
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFE11D48),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        child: const Text('Continuar al\nREVERSO', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 14, height: 1.2, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -248,6 +522,13 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
               child: MobileScanner(controller: _cameraController),
             ),
           ),
+          if (_frozenCameraFrame != null)
+            Positioned.fill(
+              child: RawImage(
+                image: _frozenCameraFrame,
+                fit: BoxFit.fill,
+              ),
+            ),
           Positioned.fill(
             child: CustomPaint(
               painter: _ScanOverlayPainter(frameW: frameW, frameH: frameH, screenW: screenW, screenH: screenH),
@@ -276,67 +557,107 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
             ),
           ),
           Center(child: _ScanLine(frameW: frameW, frameH: frameH)),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: Container(
+              padding: EdgeInsets.only(
+                top: MediaQuery.of(context).padding.top + 20,
+                bottom: 24,
+                left: 24,
+                right: 20,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE11D48).withOpacity(0.95), // Color primario
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10)],
+              ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _iconBtn(Icons.close_rounded, onTap: () => Navigator.pop(context)),
-                  const Text('Escanear INE', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  _iconBtn(_torchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded, onTap: _toggleTorch, active: _torchOn),
+                  const Icon(Icons.info_outline_rounded, color: Colors.white, size: 28),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      _isCapturingBack 
+                          ? 'Mantén la posición para\ncapturar el REVERSO.'
+                          : 'Mantén la posición para\ncapturar el FRENTE.',
+                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500, height: 1.3),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.black26),
+                      child: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
           Positioned(
-            bottom: screenH * 0.24,
-            left: 40, right: 40,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE11D48).withOpacity(0.5)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(_isCapturingBack ? Icons.flip_to_back_rounded : Icons.crop_original_rounded, color: const Color(0xFFE11D48)),
+            top: (screenH + frameH) / 2 + 24,
+            left: 0, right: 0,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_isCapturing) ...[
+                  const SizedBox(
+                    width: 28, height: 28,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Capturando...', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+                ] else ...[
+                  const Icon(Icons.center_focus_weak_rounded, color: Colors.white54, size: 28),
                   const SizedBox(height: 8),
                   Text(
-                    _isCapturingBack ? 'PASO 2: Escanea el REVERSO' : 'PASO 1: Escanea el FRENTE',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                    _isCapturingBack ? 'Alinea el REVERSO de tu credencial' : 'Alinea el FRENTE de tu credencial',
+                    style: const TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w500),
                   ),
                 ],
-              ),
+              ],
             ),
           ),
           Align(
             alignment: Alignment.bottomCenter,
             child: SafeArea(
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 44),
+                padding: const EdgeInsets.only(bottom: 30),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _iconBtn(Icons.flip_camera_ios_rounded, onTap: _switchCamera, size: 52),
+                    _iconBtn(
+                      _torchOn ? Icons.flash_on_rounded : Icons.flash_off_rounded, 
+                      onTap: _toggleTorch, 
+                      active: _torchOn,
+                      size: 56,
+                    ),
                     GestureDetector(
                       onTap: _onCapture,
                       child: Container(
                         width: 76, height: 76,
+                        padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFFE11D48),
-                          boxShadow: [BoxShadow(color: const Color(0xFFE11D48).withOpacity(0.5), blurRadius: 32)],
+                          border: Border.all(color: Colors.white, width: 4),
                         ),
-                        child: _isCapturing 
-                          ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3)))
-                          : const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 34),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isCapturing ? Colors.white54 : Colors.white,
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 52, height: 52),
+                    _iconBtn(
+                      Icons.flip_camera_ios_rounded, 
+                      onTap: _switchCamera, 
+                      size: 56,
+                    ),
                   ],
                 ),
               ),
@@ -371,6 +692,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                       _isCapturingBack = false;
                       _apiData = null;
                       _apiError = null;
+                      _faceImage = null;
                     }),
                     icon: const Icon(Icons.arrow_back_ios_rounded, color: Colors.white),
                   ),
@@ -385,6 +707,18 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                   if (_backImage != null) _imagePreview('REVERSO', _backImage!),
                 ],
               ),
+              if (_faceImage != null) ...[  
+                const SizedBox(height: 16),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('ROSTRO DETECTADO', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(_faceImage!, height: 100, fit: BoxFit.cover),
+                ),
+              ],
               const SizedBox(height: 32),
               _buildApiSection(),
               const SizedBox(height: 20),
@@ -444,8 +778,17 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
           height: 54,
           child: ElevatedButton(
             onPressed: () async {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(child: CircularProgressIndicator(color: Color(0xFFE11D48))),
+              );
+              await _sendDataToApi();
               await _saveFinalData();
-              if (mounted) Navigator.pop(context);
+              if (mounted) {
+                Navigator.pop(context); // Cierra popup
+                Navigator.pop(context); // Cierra pantalla
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFE11D48),
@@ -463,6 +806,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
             _isCapturingBack = false;
             _apiData = null;
             _apiError = null;
+            _faceImage = null;
           }),
           child: const Text('Volver a escanear', style: TextStyle(color: Colors.white54)),
         ),
@@ -471,20 +815,22 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildUnifiedDataCard() {
-    final front = _apiData ?? {};
-    final back = _backApiData ?? {};
-
     return _card(children: [
-      _field('Nombre(s)', back['NOMBRES_MRZ'] ?? 'N/D'),
-      _field('Apellido Paterno', back['PATERNO_MRZ'] ?? 'N/D'),
-      _field('Apellido Materno', back['MATERNO_MRZ'] ?? 'N/D'),
-      _field('CURP', front['CURP'] ?? front['curp'] ?? 'N/D'),
-      _field('Clave de Elector', front['CLAVE'] ?? front['clave'] ?? 'N/D'),
-      _field('Sexo', back['SEXO'] ?? 'N/D'),
-      _field('Nacimiento', back['NACIMIENTO'] ?? 'N/D'),
-      _field('Sección', back['SECCION'] ?? 'N/D'),
-      _field('Vigencia', back['VIGENCIA'] ?? 'N/D'),
-      _field('Domicilio', front['DOMICILIO'] ?? front['domicilio'] ?? 'N/D', last: true),
+      _editableField('Nombre(s)', _controllers['NOMBRES']!),
+      _editableField('Apellido Paterno', _controllers['PATERNO']!),
+      _editableField('Apellido Materno', _controllers['MATERNO']!),
+      _editableField('CURP', _controllers['CURP']!),
+      _editableField('Clave de Elector', _controllers['CLAVE']!),
+      _editableField('Sexo', _controllers['SEXO']!),
+      _editableField('Nacimiento', _controllers['NACIMIENTO']!),
+      _editableField('Sección', _controllers['SECCION']!),
+      _editableField('Vigencia', _controllers['VIGENCIA']!),
+      _editableField('Domicilio', _controllers['DOMICILIO']!, maxLines: 3),
+      _editableField('Municipio', _controllers['MUNICIPIO']!),
+      _editableField('Colonia', _controllers['COLONIA']!),
+      _editableField('Código Postal', _controllers['CODIGO_POSTAL']!),
+      _editableField('Calle', _controllers['CALLE']!),
+      _editableField('Número', _controllers['NUMERO']!, last: true),
     ]);
   }
 
@@ -497,18 +843,26 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _field(String label, String value, {bool last = false}) {
+  Widget _editableField(String label, TextEditingController controller, {bool last = false, int maxLines = 1}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label.toUpperCase(), style: const TextStyle(color: Colors.black45, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1)),
-        const SizedBox(height: 2),
-        Text(value, style: const TextStyle(color: Color(0xFF1F2937), fontSize: 16, fontWeight: FontWeight.bold)),
-        if (!last) ...[
-          const SizedBox(height: 12),
-          const Divider(height: 1, color: Color(0xFFF3F4F6)),
-          const SizedBox(height: 12),
-        ],
+        TextFormField(
+          controller: controller,
+          maxLines: maxLines,
+          minLines: 1,
+          style: const TextStyle(color: Color(0xFF1F2937), fontSize: 16, fontWeight: FontWeight.bold),
+          decoration: const InputDecoration(
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(vertical: 8),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFF3F4F6))),
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFE11D48), width: 1.5)),
+            suffixIconConstraints: BoxConstraints(minWidth: 20, minHeight: 20),
+            suffixIcon: Icon(Icons.edit_rounded, color: Colors.black26, size: 16),
+          ),
+        ),
+        if (!last) const SizedBox(height: 16),
       ],
     );
   }

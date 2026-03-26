@@ -1,0 +1,4 @@
+-keep class androidx.camera.** { *; }
+-keep class com.google.mlkit.** { *; }
+-dontwarn androidx.camera.**
+-dontwarn com.google.mlkit.**

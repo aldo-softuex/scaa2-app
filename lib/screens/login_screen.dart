@@ -1,7 +1,73 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _isLoading = false;
+
+  Future<void> _login() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor, ingresa tu correo y contraseña.')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse('https://scaa.olgasosa.mx/api/auth/login'),
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: jsonEncode({'email': email, 'password': password}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == true && data['token'] != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('auth_token', data['token']);
+          if (data['data'] != null && data['data']['name'] != null) {
+            await prefs.setString('user_name', data['data']['name']);
+          }
+          if (mounted) Navigator.pushReplacementNamed(context, '/home');
+        } else {
+          _showError(data['message'] ?? 'Credenciales incorrectas');
+        }
+      } else {
+        _showError('Error del servidor (${response.statusCode})');
+      }
+    } catch (e) {
+      _showError('Error de red. Verifica tu conexión.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: const Color(0xFFE11D48)));
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,59 +83,57 @@ class LoginScreen extends StatelessWidget {
           ),
         ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40.0),
-            child: Column(
-              children: [
-                const SizedBox(height: 60),
-                // Official Logo Image
-                Image.asset(
-                  'assets/images/logo_scaa.png',
-                  height: 120,
-                  fit: BoxFit.contain,
-                ),
-                const SizedBox(height: 48),
-                const Text(
-                  '¡Bienvenido!',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF374151),
-                    letterSpacing: -0.5,
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    'assets/images/logo_scaa.png',
+                    height: 120,
+                    fit: BoxFit.contain,
                   ),
-                ),
-                const SizedBox(height: 56),
-
-                // Inline Inputs
-                _buildInlineInput('Correo electrónico'),
-                const SizedBox(height: 32),
-                _buildInlineInput('Contraseña', isPassword: true),
-
-                const SizedBox(height: 48),
-
-                // Pill Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE11D48),
-                      foregroundColor: Colors.white,
-                      elevation: 8,
-                      shadowColor: const Color(0xFFE11D48).withOpacity(0.4),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(28),
+                  const SizedBox(height: 48),
+                  const Text(
+                    '¡Bienvenido!',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF374151),
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 48),
+                  _buildInlineInput('Correo electrónico', _emailController, isEmail: true),
+                  const SizedBox(height: 32),
+                  _buildInlineInput('Contraseña', _passwordController, isPassword: true),
+                  const SizedBox(height: 48),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _login,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFE11D48),
+                        disabledBackgroundColor: const Color(0xFFE11D48).withOpacity(0.7),
+                        foregroundColor: Colors.white,
+                        elevation: 8,
+                        shadowColor: const Color(0xFFE11D48).withOpacity(0.4),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(28),
+                        ),
                       ),
-                    ),
-                    child: const Text(
-                      'Iniciar Sesión',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      child: _isLoading
+                          ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
+                          : const Text(
+                              'Iniciar Sesión',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
                     ),
                   ),
-                ),
-                const Spacer(),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -77,7 +141,7 @@ class LoginScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildInlineInput(String label, {bool isPassword = false}) {
+  Widget _buildInlineInput(String label, TextEditingController controller, {bool isPassword = false, bool isEmail = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -90,7 +154,9 @@ class LoginScreen extends StatelessWidget {
           ),
         ),
         TextField(
+          controller: controller,
           obscureText: isPassword,
+          keyboardType: isEmail ? TextInputType.emailAddress : TextInputType.text,
           style: const TextStyle(color: Color(0xFF374151), fontWeight: FontWeight.w600),
           decoration: const InputDecoration(
             isDense: true,
