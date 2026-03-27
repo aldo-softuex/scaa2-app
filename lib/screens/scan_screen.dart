@@ -366,6 +366,10 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
       'CODIGO_POSTAL': _controllers['CODIGO_POSTAL']!.text.isNotEmpty ? _controllers['CODIGO_POSTAL']!.text : 'N/D',
       'CALLE': _controllers['CALLE']!.text.isNotEmpty ? _controllers['CALLE']!.text : 'N/D',
       'NUMERO': _controllers['NUMERO']!.text.isNotEmpty ? _controllers['NUMERO']!.text : 'N/D',
+      // Imágenes en base64
+      'imagenb64': _frontImage != null ? base64Encode(_frontImage!) : '',
+      'imagen_face': _faceImage != null ? base64Encode(_faceImage!) : '',
+      'ine_trasera': _backImage != null ? base64Encode(_backImage!) : '',
     };
 
     String? existingData = prefs.getString('saved_ines');

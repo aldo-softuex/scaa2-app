@@ -23,7 +23,7 @@ class OCRService {
       
       return fullText;
     } catch (e) {
-      print("❌ Error en OCR: $e");
+      debugPrint("❌ Error en OCR: $e");
       return "";
     }
   }
@@ -33,19 +33,18 @@ class OCRService {
     // 1. Clonamos la lista de bloques para no mutar el original
     List<TextBlock> blocks = List.from(recognizedText.blocks);
     
-    // 2. Ordenar bloques por posición vertical (Y)
+    // ...resto del código abajo queda intacto, sólo se ajusta `extraerDatosPosterior` para el MRZ
+    
     blocks.sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
 
     List<String> orderedWords = [];
 
     for (var block in blocks) {
-      // 3. Ordenar líneas por posición horizontal (X) para evitar saltos raros
       List<TextLine> lines = List.from(block.lines);
       lines.sort((a, b) => a.boundingBox.left.compareTo(b.boundingBox.left));
 
       for (var line in lines) {
         for (var element in line.elements) {
-          // Normalizar palabra
           String word = element.text.trim();
           if (word.isNotEmpty) {
             orderedWords.add(word);
@@ -54,7 +53,6 @@ class OCRService {
       }
     }
 
-    // Unimos con un solo espacio y limpiamos espacios múltiples
     return orderedWords.join(" ").replaceAll(RegExp(r'\s+'), ' ');
   }
 

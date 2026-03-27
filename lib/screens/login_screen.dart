@@ -40,8 +40,9 @@ class _LoginScreenState extends State<LoginScreen> {
         if (data['status'] == true && data['token'] != null) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('auth_token', data['token']);
-          if (data['data'] != null && data['data']['name'] != null) {
-            await prefs.setString('user_name', data['data']['name']);
+          if (data['data'] != null) {
+            await prefs.setString('user_name', data['data']['name'] ?? '');
+            await prefs.setString('user_email', data['data']['email'] ?? '');
           }
           if (mounted) Navigator.pushReplacementNamed(context, '/home');
         } else {

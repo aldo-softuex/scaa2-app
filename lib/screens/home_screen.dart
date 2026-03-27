@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'dart:typed_data';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -231,7 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           String docTitle = 'INE - $nameFirstWord $paterno';
                           String fullName = '$nombres $paterno $materno'.trim();
                           
-                          return _buildRecentCard(docTitle, fullName, timeStr, isDarkMode);
+                          return _buildRecentCard(context, docTitle, fullName, timeStr, record, isDarkMode);
                         },
                       ),
               ),
@@ -328,56 +329,189 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildRecentCard(String title, String data, String time, bool isDarkMode) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF111827) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDarkMode ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
-          width: 1.2,
+  void _showRecordDetail(BuildContext context, Map<String, dynamic> record, bool isDarkMode) {
+    Uint8List? imgFrente, imgTrasera, imgCara;
+
+    try { if ((record['imagenb64'] ?? '').isNotEmpty) imgFrente = base64Decode(record['imagenb64']); } catch (_) {}
+    try { if ((record['ine_trasera'] ?? '').isNotEmpty) imgTrasera = base64Decode(record['ine_trasera']); } catch (_) {}
+    try { if ((record['imagen_face'] ?? '').isNotEmpty) imgCara = base64Decode(record['imagen_face']); } catch (_) {}
+
+    final fields = [
+      ['Nombre(s)', record['NOMBRES']],
+      ['Paterno', record['PATERNO']],
+      ['Materno', record['MATERNO']],
+      ['Sexo', record['SEXO']],
+      ['Fecha Nacimiento', record['NACIMIENTO']],
+      ['CURP', record['CURP']],
+      ['Clave Elector', record['CLAVE']],
+      ['Sección', record['SECCION']],
+      ['Vigencia', record['VIGENCIA']],
+      ['Municipio', record['MUNICIPIO']],
+      ['Domicilio', record['DOMICILIO']],
+      ['Colonia', record['COLONIA']],
+      ['Código Postal', record['CODIGO_POSTAL']],
+      ['Calle', record['CALLE']],
+      ['Número', record['NUMERO']],
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.85,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          builder: (context, scrollController) {
+            return Container(
+              decoration: BoxDecoration(
+                color: isDarkMode ? const Color(0xFF111827) : Colors.white,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  // Handle
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12, bottom: 8),
+                    child: Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(color: Colors.grey[400], borderRadius: BorderRadius.circular(2)),
+                    ),
+                  ),
+                  // Titulo
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.description_rounded, color: Color(0xFFE11D48)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '${record['NOMBRES'] ?? ''} ${record['PATERNO'] ?? ''}'.trim(),
+                            style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold,
+                              color: isDarkMode ? Colors.white : const Color(0xFF374151),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  // Contenido desplazable
+                  Expanded(
+                    child: ListView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.all(20),
+                      children: [
+                        // ---- Fila de las 3 imágenes ----
+                        if (imgFrente != null || imgTrasera != null || imgCara != null) ...[
+                          Row(
+                            children: [
+                              if (imgFrente != null)
+                                _buildImageTile(imgFrente, 'Delantera', isDarkMode),
+                              if (imgTrasera != null)
+                                _buildImageTile(imgTrasera, 'Trasera', isDarkMode),
+                              if (imgCara != null)
+                                _buildImageTile(imgCara, 'Cara', isDarkMode, isCircle: true),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                        ],
+                        // ---- Campos extraídos ----
+                        ...fields.where((f) => f[1] != null && f[1] != 'N/D' && f[1]!.isNotEmpty).map((f) =>
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 14),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SizedBox(
+                                  width: 120,
+                                  child: Text(f[0]!, style: TextStyle(fontSize: 12, color: isDarkMode ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280))),
+                                ),
+                                Expanded(
+                                  child: Text(f[1]!, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: isDarkMode ? Colors.white : const Color(0xFF374151))),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildImageTile(Uint8List bytes, String label, bool isDarkMode, {bool isCircle = false}) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          children: [
+            isCircle
+                ? CircleAvatar(radius: 40, backgroundImage: MemoryImage(bytes))
+                : ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(bytes, height: 80, fit: BoxFit.cover, width: double.infinity),
+                  ),
+            const SizedBox(height: 6),
+            Text(label, style: TextStyle(fontSize: 11, color: isDarkMode ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280))),
+          ],
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isDarkMode ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.description_rounded, color: Color(0xFFE11D48)),
+    );
+  }
+
+  Widget _buildRecentCard(BuildContext context, String title, String data, String time, Map<String, dynamic> record, bool isDarkMode) {
+    return GestureDetector(
+      onTap: () => _showRecordDetail(context, record, isDarkMode),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDarkMode ? const Color(0xFF111827) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDarkMode ? const Color(0xFF1F2937) : const Color(0xFFE2E8F0),
+            width: 1.2,
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDarkMode ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.description_rounded, color: Color(0xFFE11D48)),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF9CA3AF))),
+                  Text(data, style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? Colors.white : const Color(0xFF374151), fontSize: 15)),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF9CA3AF)),
-                ),
-                Text(
-                  data,
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: isDarkMode ? Colors.white : const Color(0xFF374151),
-                      fontSize: 15),
-                ),
+                Text(time, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFFE11D48)),
               ],
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(time, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFFE5E7EB)),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
