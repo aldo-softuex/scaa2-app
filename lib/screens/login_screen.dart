@@ -14,6 +14,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   Future<void> _login() async {
     final email = _emailController.text.trim();
@@ -46,8 +47,10 @@ class _LoginScreenState extends State<LoginScreen> {
           }
           if (mounted) Navigator.pushReplacementNamed(context, '/home');
         } else {
-          _showError(data['message'] ?? 'Credenciales incorrectas');
+          _showError(data['message'] ?? 'Usuario y/o contraseña incorrectos');
         }
+      } else if (response.statusCode == 400) {
+        _showError('Usuario y/o contraseña incorrectos');
       } else {
         _showError('Error del servidor (${response.statusCode})');
       }
@@ -156,18 +159,32 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         TextField(
           controller: controller,
-          obscureText: isPassword,
+          obscureText: isPassword ? _obscurePassword : false,
           keyboardType: isEmail ? TextInputType.emailAddress : TextInputType.text,
           style: const TextStyle(color: Color(0xFF374151), fontWeight: FontWeight.w600),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             isDense: true,
-            contentPadding: EdgeInsets.symmetric(vertical: 8),
-            enabledBorder: UnderlineInputBorder(
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            enabledBorder: const UnderlineInputBorder(
               borderSide: BorderSide(color: Color(0xFFE5E7EB)),
             ),
-            focusedBorder: UnderlineInputBorder(
+            focusedBorder: const UnderlineInputBorder(
               borderSide: BorderSide(color: Color(0xFFE11D48)),
             ),
+            suffixIconConstraints: const BoxConstraints(minHeight: 24, minWidth: 24),
+            suffixIcon: isPassword 
+              ? InkWell(
+                  onTap: () => setState(() => _obscurePassword = !_obscurePassword),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Icon(
+                      _obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                      color: const Color(0xFF9CA3AF),
+                      size: 20,
+                    ),
+                  ),
+                )
+              : null,
           ),
         ),
       ],

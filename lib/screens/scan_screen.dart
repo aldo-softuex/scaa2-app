@@ -13,6 +13,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../services/ner_scanner_service.dart';
 import '../services/ocr_service.dart';
 import '../utils/address_parser.dart';
+import 'package:geolocator/geolocator.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -52,6 +53,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
   final FaceDetector _faceDetector = FaceDetector(options: FaceDetectorOptions());
 
   final Map<String, TextEditingController> _controllers = {
+    'TELEFONO': TextEditingController(),
     'NOMBRES': TextEditingController(),
     'PATERNO': TextEditingController(),
     'MATERNO': TextEditingController(),
@@ -83,6 +85,14 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     _pulseAnimation = Tween<double>(begin: 0.97, end: 1.03).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
+    _requestLocationPermission();
+  }
+
+  Future<void> _requestLocationPermission() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      await Geolocator.requestPermission();
+    }
   }
 
   @override
@@ -297,9 +307,32 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     }
   }
 
-  Future<void> _sendDataToApi() async {
+  Future<http.Response?> _sendDataToApi() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? token = prefs.getString('auth_token');
+      debugPrint('TOKEN DE AUTORIZACIÓN: $token');
+
+      // Obtener coordenadas de forma silenciosa
+      String coords = "";
+      try {
+        Position position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+          timeLimit: const Duration(seconds: 3),
+        );
+        coords = "${position.latitude},${position.longitude}";
+      } catch (e) {
+        debugPrint('Error obteniendo coordenadas (silencioso): $e');
+      }
+
+      String vigenciaFull = _controllers['VIGENCIA']?.text ?? "";
+      String vigenciaAnio = vigenciaFull.contains('/') 
+          ? vigenciaFull.split('/').last 
+          : (vigenciaFull.length > 4 ? vigenciaFull.substring(vigenciaFull.length - 4) : vigenciaFull);
+
       final Map<String, dynamic> body = {
+        "archivo_procesado": _controllers['TELEFONO']?.text ?? "",
+        "coordenadas": coords,
         "SEXO": _controllers['SEXO']?.text ?? "",
         "PATERNO": _controllers['PATERNO']?.text ?? "",
         "MATERNO": _controllers['MATERNO']?.text ?? "",
@@ -308,7 +341,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
         "MUNICIPIO": _controllers['MUNICIPIO']?.text ?? "",
         "NACIMIENTO": _controllers['NACIMIENTO']?.text ?? "",
         "SECCION": _controllers['SECCION']?.text ?? "",
-        "VIGENCIA": _controllers['VIGENCIA']?.text ?? "",
+        "VIGENCIA": vigenciaAnio,
         "CURP": _controllers['CURP']?.text ?? "",
         "CLAVE": _controllers['CLAVE']?.text ?? "",
         "COLONIA": _controllers['COLONIA']?.text ?? "",
@@ -322,7 +355,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
 
       final String reqBody = json.encode(body);
       
-      // Crear copia para el log acortando las imágenes para no saturar la consola
       final Map<String, dynamic> logBody = Map.from(body);
       if (logBody['imagenb64'].toString().length > 30) logBody['imagenb64'] = '[BASE64_FRENTE_AQUI]';
       if (logBody['imagen_face'].toString().length > 30) logBody['imagen_face'] = '[BASE64_ROSTRO_AQUI]';
@@ -331,18 +363,21 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
       debugPrint('Enviando petición a la API con BODY: ${json.encode(logBody)}');
 
       final response = await http.post(
-        Uri.parse('https://scaa.olgasosa.mx/api/seccion/crear/dev'),
+        Uri.parse('https://scaa.olgasosa.mx/api/v1/seccion/crear/dev'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+          'Authorization': 'Bearer ${token ?? ""}',
         },
         body: reqBody,
       ).timeout(const Duration(seconds: 15));
 
       debugPrint('Status POST final: ${response.statusCode}');
       debugPrint('Body POST final: ${response.body}');
+      return response;
     } catch (e) {
       debugPrint('Error en POST final: $e');
+      return null;
     }
   }
 
@@ -351,6 +386,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     
     Map<String, dynamic> record = {
       'timestamp': DateTime.now().toIso8601String(),
+      'TELEFONO': _controllers['TELEFONO']!.text.isNotEmpty ? _controllers['TELEFONO']!.text : 'N/D',
       'NOMBRES': _controllers['NOMBRES']!.text.isNotEmpty ? _controllers['NOMBRES']!.text : 'N/D',
       'PATERNO': _controllers['PATERNO']!.text.isNotEmpty ? _controllers['PATERNO']!.text : 'N/D',
       'MATERNO': _controllers['MATERNO']!.text.isNotEmpty ? _controllers['MATERNO']!.text : 'N/D',
@@ -798,17 +834,19 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                 barrierDismissible: false,
                 builder: (context) => const Center(child: CircularProgressIndicator(color: Color(0xFFE11D48))),
               );
-              await _sendDataToApi();
+              final response = await _sendDataToApi();
               await _saveFinalData();
               if (!mounted) return;
               
               Navigator.pop(context); // Cierra el modal de carga
 
+              bool isSuccess = response != null && (response.statusCode == 200 || response.statusCode == 201);
+
               showModalBottomSheet(
                 context: context,
                 isScrollControlled: true,
-                isDismissible: false,
-                enableDrag: false,
+                isDismissible: isSuccess,
+                enableDrag: isSuccess,
                 shape: const RoundedRectangleBorder(
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 ),
@@ -818,7 +856,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                       left: 24, 
                       right: 24, 
                       top: 20, 
-                      bottom: MediaQuery.of(context).padding.bottom + 24, // Protege contra la barra de navegación nativa
+                      bottom: MediaQuery.of(context).padding.bottom + 24,
                     ),
                     decoration: const BoxDecoration(
                       color: Colors.white,
@@ -832,33 +870,37 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                           decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
                         ),
                         const SizedBox(height: 24),
-                        const Text('¡Registro Guardado!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        Text(isSuccess ? '¡Registro Guardado!' : 'Error al Guardar', 
+                             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: isSuccess ? Colors.black87 : const Color(0xFFE11D48))),
                         const SizedBox(height: 20),
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             boxShadow: [
-                              BoxShadow(color: const Color(0xFFE11D48).withOpacity(0.3), blurRadius: 20, spreadRadius: 5)
+                              BoxShadow(color: (isSuccess ? const Color(0xFFE11D48) : Colors.black).withOpacity(0.3), blurRadius: 20, spreadRadius: 5)
                             ],
                           ),
-                          child: const Icon(Icons.check_rounded, color: Color(0xFFE11D48), size: 60),
+                          child: Icon(isSuccess ? Icons.check_rounded : Icons.close_rounded, color: const Color(0xFFE11D48), size: 60),
                         ),
                         const SizedBox(height: 20),
-                        const Text('Tu información se ha guardado\ncorrectamente.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.black87)),
+                        Text(isSuccess 
+                             ? 'Tu información se ha guardado correctamente.'
+                             : 'No se pudo guardar la información en el servidor.', 
+                             textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, color: Colors.black87)),
                         const SizedBox(height: 32),
                         SizedBox(
                           width: double.infinity, height: 50,
                           child: ElevatedButton(
                             onPressed: () {
                               Navigator.pop(context); // Cierra bottom sheet
-                              Navigator.pop(context); // Regresa a home
+                              if (isSuccess) Navigator.pop(context); // Regresa a home solo si fue exitoso
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFFE11D48),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
-                            child: const Text('Entendido', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                            child: Text(isSuccess ? 'Entendido' : 'Cerrar', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ],
@@ -893,21 +935,22 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
 
   Widget _buildUnifiedDataCard() {
     return _card(children: [
-      _editableField('Nombre(s)', _controllers['NOMBRES']!),
-      _editableField('Apellido Paterno', _controllers['PATERNO']!),
-      _editableField('Apellido Materno', _controllers['MATERNO']!),
-      _editableField('CURP', _controllers['CURP']!),
-      _editableField('Clave de Elector', _controllers['CLAVE']!),
-      _editableField('Sexo', _controllers['SEXO']!),
-      _editableField('Nacimiento', _controllers['NACIMIENTO']!),
-      _editableField('Sección', _controllers['SECCION']!),
-      _editableField('Vigencia', _controllers['VIGENCIA']!),
-      _editableField('Domicilio', _controllers['DOMICILIO']!, maxLines: 3),
-      _editableField('Municipio', _controllers['MUNICIPIO']!),
-      _editableField('Colonia', _controllers['COLONIA']!),
-      _editableField('Código Postal', _controllers['CODIGO_POSTAL']!),
-      _editableField('Calle', _controllers['CALLE']!),
-      _editableField('Número', _controllers['NUMERO']!, last: true),
+      _numericField('Teléfono de Contacto', _controllers['TELEFONO']!, maxLength: 10, isHighlight: true),
+      _textField('Nombre(s)', _controllers['NOMBRES']!),
+      _textField('Apellido Paterno', _controllers['PATERNO']!),
+      _textField('Apellido Materno', _controllers['MATERNO']!),
+      _textField('CURP', _controllers['CURP']!),
+      _textField('Clave de Elector', _controllers['CLAVE']!),
+      _sexoDropdown(),
+      _dateField('Nacimiento', _controllers['NACIMIENTO']!),
+      _numericField('Sección', _controllers['SECCION']!, maxLength: 4),
+      _dateField('Vigencia', _controllers['VIGENCIA']!),
+      _textField('Domicilio', _controllers['DOMICILIO']!, maxLines: 3),
+      _textField('Municipio', _controllers['MUNICIPIO']!),
+      _textField('Colonia', _controllers['COLONIA']!),
+      _numericField('Código Postal', _controllers['CODIGO_POSTAL']!, maxLength: 5),
+      _textField('Calle', _controllers['CALLE']!),
+      _numericField('Número', _controllers['NUMERO']!, last: true),
     ]);
   }
 
@@ -920,7 +963,8 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _editableField(String label, TextEditingController controller, {bool last = false, int maxLines = 1}) {
+  // ─── Campo de texto libre ───────────────────────────────────────────────────
+  Widget _textField(String label, TextEditingController controller, {bool last = false, int maxLines = 1}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -929,6 +973,8 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
           controller: controller,
           maxLines: maxLines,
           minLines: 1,
+          keyboardType: TextInputType.text,
+          textCapitalization: TextCapitalization.characters,
           style: const TextStyle(color: Color(0xFF1F2937), fontSize: 16, fontWeight: FontWeight.bold),
           decoration: const InputDecoration(
             isDense: true,
@@ -938,6 +984,156 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
             suffixIconConstraints: BoxConstraints(minWidth: 20, minHeight: 20),
             suffixIcon: Icon(Icons.edit_rounded, color: Colors.black26, size: 16),
           ),
+        ),
+        if (!last) const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  // ─── Campo numérico con longitud máxima ────────────────────────────────────
+  Widget _numericField(String label, TextEditingController controller, {bool last = false, int? maxLength, bool isHighlight = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(label.toUpperCase(), style: TextStyle(color: isHighlight ? const Color(0xFFE11D48) : Colors.black45, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1)),
+            if (isHighlight) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.star_rounded, color: Color(0xFFE11D48), size: 10),
+            ],
+          ],
+        ),
+        TextFormField(
+          controller: controller,
+          keyboardType: TextInputType.phone, // Formato telefónico
+          maxLength: maxLength,
+          style: TextStyle(color: const Color(0xFF1F2937), fontSize: 16, fontWeight: isHighlight ? FontWeight.w900 : FontWeight.bold),
+          decoration: InputDecoration(
+            isDense: true,
+            counterText: maxLength != null ? '' : null,
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: isHighlight ? const Color(0xFFE11D48).withOpacity(0.2) : const Color(0xFFF3F4F6))),
+            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFE11D48), width: 1.5)),
+            suffixIconConstraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (maxLength != null)
+                  Text('$maxLength díg.', style: const TextStyle(color: Colors.black26, fontSize: 10)),
+                const SizedBox(width: 4),
+                Icon(isHighlight ? Icons.phone_android_rounded : Icons.tag_rounded, color: isHighlight ? const Color(0xFFE11D48) : Colors.black26, size: 16),
+              ],
+            ),
+          ),
+        ),
+        if (!last) const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  // ─── Selector de fecha ─────────────────────────────────────────────────────
+  Widget _dateField(String label, TextEditingController controller, {bool last = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label.toUpperCase(), style: const TextStyle(color: Colors.black45, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1)),
+        TextFormField(
+          controller: controller,
+          readOnly: true,
+          style: const TextStyle(color: Color(0xFF1F2937), fontSize: 16, fontWeight: FontWeight.bold),
+          decoration: const InputDecoration(
+            isDense: true,
+            hintText: 'DD/MM/AAAA',
+            hintStyle: TextStyle(color: Colors.black26, fontSize: 14),
+            contentPadding: EdgeInsets.symmetric(vertical: 8),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFF3F4F6))),
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFE11D48), width: 1.5)),
+            suffixIconConstraints: BoxConstraints(minWidth: 20, minHeight: 20),
+            suffixIcon: Icon(Icons.calendar_today_rounded, color: Color(0xFFE11D48), size: 18),
+          ),
+          onTap: () async {
+            // Intentar parsear la fecha actual del campo
+            DateTime? initial;
+            final parts = controller.text.split('/');
+            if (parts.length == 3) {
+              try {
+                initial = DateTime(
+                  int.parse(parts[2]),
+                  int.parse(parts[1]),
+                  int.parse(parts[0]),
+                );
+              } catch (_) {}
+            }
+            final DateTime? picked = await showDatePicker(
+              context: context,
+              initialDate: initial ?? DateTime(1990),
+              firstDate: DateTime(1900),
+              lastDate: DateTime(2100),
+              locale: const Locale('es', 'MX'),
+              builder: (context, child) {
+                return Theme(
+                  data: ThemeData.light().copyWith(
+                    colorScheme: const ColorScheme.light(
+                      primary: Color(0xFFE11D48),
+                      onPrimary: Colors.white,
+                      surface: Colors.white,
+                    ),
+                    textButtonTheme: TextButtonThemeData(
+                      style: TextButton.styleFrom(foregroundColor: const Color(0xFFE11D48)),
+                    ),
+                  ),
+                  child: child!,
+                );
+              },
+            );
+            if (picked != null) {
+              final day = picked.day.toString().padLeft(2, '0');
+              final month = picked.month.toString().padLeft(2, '0');
+              final year = picked.year.toString();
+              controller.text = '$day/$month/$year';
+            }
+          },
+        ),
+        if (!last) const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  // ─── Dropdown SEXO (H / M) ─────────────────────────────────────────────────
+  Widget _sexoDropdown({bool last = false}) {
+    final validValues = ['H', 'M'];
+    final currentVal = _controllers['SEXO']!.text;
+    final dropdownVal = validValues.contains(currentVal) ? currentVal : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('SEXO', style: TextStyle(color: Colors.black45, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 1)),
+        DropdownButtonFormField<String>(
+          value: dropdownVal,
+          isExpanded: true,
+          dropdownColor: Colors.white,
+          icon: const Icon(Icons.arrow_drop_down_rounded, color: Color(0xFFE11D48)),
+          style: const TextStyle(color: Color(0xFF1F2937), fontSize: 16, fontWeight: FontWeight.bold),
+          decoration: const InputDecoration(
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(vertical: 8),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFF3F4F6))),
+            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFE11D48), width: 1.5)),
+          ),
+          items: const [
+            DropdownMenuItem(
+              value: 'H', 
+              child: Text('H – Hombre', style: TextStyle(color: Color(0xFF1F2937), fontWeight: FontWeight.bold))
+            ),
+            DropdownMenuItem(
+              value: 'M', 
+              child: Text('M – Mujer', style: TextStyle(color: Color(0xFF1F2937), fontWeight: FontWeight.bold))
+            ),
+          ],
+          onChanged: (val) {
+            if (val != null) setState(() => _controllers['SEXO']!.text = val);
+          },
         ),
         if (!last) const SizedBox(height: 16),
       ],

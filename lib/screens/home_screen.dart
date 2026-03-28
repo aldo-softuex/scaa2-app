@@ -74,12 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    IconButton(
-                      icon: Icon(Icons.more_horiz_rounded,
-                          size: 32,
-                          color: isDarkMode ? Colors.white : const Color(0xFF374151)),
-                      onPressed: () => Navigator.pushNamed(context, '/settings'),
-                    ),
+                    const SizedBox(width: 48), // Espaciador para mantener el diseño
                     GestureDetector(
                       onTap: () => Navigator.pushNamed(context, '/profile'),
                       child: Container(
@@ -180,12 +175,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           context,
                           'REVISAR\nDATOS',
                           Icons.assignment_rounded,
-                          isDarkMode ? const Color(0xFF1F2937) : Colors.white,
-                          isDarkMode),
-                      _buildActionCard(
-                          context,
-                          'AJUSTES',
-                          Icons.settings_rounded,
                           isDarkMode ? const Color(0xFF1F2937) : Colors.white,
                           isDarkMode),
                     ],
@@ -337,6 +326,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try { if ((record['imagen_face'] ?? '').isNotEmpty) imgCara = base64Decode(record['imagen_face']); } catch (_) {}
 
     final fields = [
+      ['Teléfono', record['TELEFONO']],
       ['Nombre(s)', record['NOMBRES']],
       ['Paterno', record['PATERNO']],
       ['Materno', record['MATERNO']],

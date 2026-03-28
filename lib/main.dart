@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/scan_screen.dart';
@@ -20,6 +21,11 @@ class SCAAApp extends StatelessWidget {
       title: 'SCAA Scanner',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.system,
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [
+        Locale('es', 'MX'),
+        Locale('en', 'US'),
+      ],
       theme: ThemeData(
         useMaterial3: true,
         primaryColor: const Color(0xFFE11D48),

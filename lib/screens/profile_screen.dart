@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -11,6 +13,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   String _nombre = '';
   String _email = '';
+  String _ubicacion = 'Detectando...';
   bool _loading = true;
 
   @override
@@ -26,6 +29,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _email = prefs.getString('user_email') ?? '';
       _loading = false;
     });
+    _obtenerUbicacion();
+  }
+
+  Future<void> _obtenerUbicacion() async {
+    try {
+      // Verificar permisos básicos
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() => _ubicacion = "Permiso denegado");
+          return;
+        }
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.low,
+        timeLimit: const Duration(seconds: 10),
+      );
+
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      if (placemarks.isNotEmpty) {
+        final p = placemarks[0];
+        setState(() {
+          _ubicacion = "${p.locality ?? ''}, ${p.administrativeArea ?? ''}".trim();
+          if (_ubicacion.startsWith(',')) _ubicacion = _ubicacion.substring(1).trim();
+          if (_ubicacion.endsWith(',')) _ubicacion = _ubicacion.substring(0, _ubicacion.length - 1).trim();
+          if (_ubicacion.isEmpty) _ubicacion = "Ubicación detectada";
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _ubicacion = "No disponible");
+    }
   }
 
   @override
@@ -58,7 +98,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   if (_email.isNotEmpty)
                     _buildProfileItem(Icons.email_outlined, 'Email', _email),
                   _buildProfileItem(Icons.phone_outlined, 'Teléfono', '+52 555 123 4567'),
-                  _buildProfileItem(Icons.location_on_outlined, 'Ubicación', 'Ciudad de México, MX'),
+                  _buildProfileItem(Icons.location_on_outlined, 'Ubicación', _ubicacion),
                   const SizedBox(height: 48),
                   SizedBox(
                     width: double.infinity,
