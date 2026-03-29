@@ -660,7 +660,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                     child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Capturando...', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+                  const Text('Procesando...', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
                 ] else ...[
                   const Icon(Icons.center_focus_weak_rounded, color: Colors.white54, size: 28),
                   const SizedBox(height: 8),
@@ -885,7 +885,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                         ),
                         const SizedBox(height: 20),
                         Text(isSuccess 
-                             ? 'Tu información se ha guardado correctamente.'
+                             ? 'La información se ha guardado correctamente.'
                              : 'No se pudo guardar la información en el servidor.', 
                              textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, color: Colors.black87)),
                         const SizedBox(height: 32),

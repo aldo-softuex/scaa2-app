@@ -44,6 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
           if (data['data'] != null) {
             await prefs.setString('user_name', data['data']['name'] ?? '');
             await prefs.setString('user_email', data['data']['email'] ?? '');
+            await prefs.setInt('user_id', data['data']['id'] ?? 0);
           }
           if (mounted) Navigator.pushReplacementNamed(context, '/home');
         } else {
